@@ -1,0 +1,76 @@
+# LbT
+
+Learning by Teaching（LbT）形式の対話システムを管理するリポジトリです。現在は、プログラミング分野の二分探索を題材にした Streamlit アプリを含んでいます。
+
+## アプリ構成
+
+```text
+.
+├── AGENTS.md
+├── README.md
+└── lbt_programming_binarysearch/
+    ├── app.py
+    ├── requirements.txt
+    ├── .env.example
+    └── .streamlit/
+        └── config.toml
+```
+
+- `lbt_programming_binarysearch/`: プログラミング・二分探索向けの LbT アプリ。
+- `AGENTS.md`: コントリビューター向けの作業ガイド。
+- `LbT.py`: 現在は未使用のプレースホルダー。
+
+## 概要
+
+このアプリでは、ユーザーが Tutor として二分探索を教え、AI 学習者 `AlgoBo` が質問や応答を返します。Tutor の発話は分類され、指示偏重・説明しすぎ・情報不足などの傾向がある場合は Teaching Helper が改善を促します。
+
+## セットアップ
+
+```bash
+cd lbt_programming_binarysearch
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+この環境では `uv` を使う場合もあります。
+
+```bash
+uv venv .venv
+uv pip install -r requirements.txt
+```
+
+## OpenAI API キー
+
+`lbt_programming_binarysearch/.env` を作成し、API キーを設定します。
+
+```text
+OPENAI_API_KEY=sk-...
+```
+
+必要に応じてモデルも変更できます。
+
+```text
+OPENAI_MODEL_ID=gpt-5.2
+OPENAI_MODEL_ID_CLS=gpt-5-nano
+```
+
+`.env` は git 管理しないでください。設定例は `.env.example` を参照してください。
+
+## 起動方法
+
+```bash
+cd lbt_programming_binarysearch
+source .venv/bin/activate
+streamlit run app.py
+```
+
+ブラウザで `http://localhost:8501` を開きます。
+
+## 確認コマンド
+
+```bash
+python -m py_compile app.py
+```
+
+現在、自動テストは未整備です。変更後は構文チェックと Streamlit の手動起動確認を行ってください。
