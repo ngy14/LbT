@@ -1619,6 +1619,8 @@ def main():
 
     if "loop_used_proto_ids" not in st.session_state:
         st.session_state.loop_used_proto_ids = []   # 追い質問ループ内で使ったプロトコルID
+    if "pending_question_after_conflict" not in st.session_state:
+        st.session_state.pending_question_after_conflict = False
 
 
     # --- normalized log (turns) ---
@@ -2018,6 +2020,9 @@ def main():
             st.session_state.loop_used_proto_ids = []
             loop_end_reason = "consistency_conflict"
 
+            if msg_count_after % 3 == 0:
+                st.session_state.pending_question_after_conflict = True
+
             if LOG_TIMING_TRACE:
                 timing["policy"] = "consistency_check"
                 timing["rule"] = "consistency_check.verdict == CONFLICT"
@@ -2119,7 +2124,11 @@ def main():
 
         else:
             # --- 通常の Mode-shifting（3メッセージごと） :contentReference[oaicite:16]{index=16}
-            if st.session_state.msg_count % 3 == 0:
+            should_start_pending_question = bool(st.session_state.pending_question_after_conflict)
+            should_start_periodic_question = (st.session_state.msg_count % 3 == 0)
+
+            if should_start_pending_question or should_start_periodic_question:
+                st.session_state.pending_question_after_conflict = False
                 st.session_state.mode = "QUESTIONER"
                 st.session_state.question_loop_active = True
                 st.session_state.loop_used_proto_ids = []  # ★新しい質問ループ開始なのでリセット
@@ -2128,8 +2137,8 @@ def main():
                 qtype = "HOW" if st.session_state.objective >= 3 else "WHY"
                 refined_q = generate_question_safe(client, last_convo, st.session_state.past_questions, qtype=qtype)
                 if LOG_TIMING_TRACE:
-                    timing["policy"] = "fixed_every_3"
-                    timing["rule"] = "msg_count_after % 3 == 0"
+                    timing["policy"] = "pending_after_conflict" if should_start_pending_question else "fixed_every_3"
+                    timing["rule"] = "pending_question_after_conflict" if should_start_pending_question else "msg_count_after % 3 == 0"
                     timing["triggered"] = True
                     timing["trigger_kind"] = "cycle_start"
 
@@ -2296,6 +2305,7 @@ def main():
             "last_thinking_question",
             "helper_chat_keys", "helper_log_keys",
             "loop_used_proto_ids",
+            "pending_question_after_conflict",
             "rewrite_origin",
             "rewrite_editor",
             "helper_choice_radio",
