@@ -6,6 +6,12 @@
 - フロントエンド: React / Vite
 - 既存の Streamlit 版は `../lbt_programming_binarysearch/` に残しています。
 
+## UI
+
+- ChatGPT のチャット画面に近い、中央カラム型のUIです。
+- User と LLM（AlgoBo）の発話を区別しやすいように、それぞれのアイコンを表示します。
+- 入力欄は画面下部に配置し、会話履歴を見ながら Tutor の発話を送信できます。
+
 ## まず実行する
 
 前提:

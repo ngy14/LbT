@@ -15,6 +15,13 @@ Learning by Teaching（LbT）形式の対話システムを管理するリポジ
 - `lbt_programming_binarysearch/`: 既存の Streamlit アプリです。これまでの単一 Python アプリを残しています。
 - `lbt_programming_binarysearch_web/`: バックエンドとフロントエンドを分けた新しい構成です。バックエンドは Flask、フロントエンドは React です。
 
+## Flask + React 版の特徴
+
+- ChatGPT のチャット画面に近い、中央カラム型の会話UIです。
+- User と LLM（AlgoBo）の発話を見分けやすいように、それぞれのアイコンを表示します。
+- 画面下部の入力欄から Tutor の発話を送信し、AlgoBo の応答を会話形式で確認できます。
+- 会話制御、知識抽出、矛盾確認、質問生成は Flask バックエンド側で処理します。
+
 ## Flask + React 版を実行する
 
 前提:
@@ -41,6 +48,12 @@ docker compose up --build
 ```
 
 ブラウザで `http://localhost:5000` を開きます。
+
+停止する場合:
+
+```bash
+docker compose down
+```
 
 ## Streamlit 版を実行する
 
