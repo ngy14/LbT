@@ -1,0 +1,14 @@
+services:
+  lbt-web:
+    build:
+      context: .
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL_ID: ${OPENAI_MODEL_ID:-gpt-5.2}
+      OPENAI_MODEL_ID_GEN: ${OPENAI_MODEL_ID_GEN:-gpt-5.2}
+      OPENAI_MODEL_ID_CLS: ${OPENAI_MODEL_ID_CLS:-gpt-5-nano}
+      OPENAI_MODEL_ID_TQG: ${OPENAI_MODEL_ID_TQG:-gpt-5.2}
+      OPENAI_MODEL_ID_PARA: ${OPENAI_MODEL_ID_PARA:-gpt-5-nano}
+    ports:
+      - "5000:5000"
+    restart: unless-stopped

@@ -1,101 +1,62 @@
 # LbT
 
-Learning by Teaching（LbT）形式の対話システムを管理するリポジトリです。現在は、プログラミング分野の二分探索を題材にした Streamlit アプリを含んでいます。
-
-## まず実行する
-
-前提:
-
-- Python 3.10 以上
-- OpenAI API キー
-
-```bash
-git clone <このリポジトリのURL>
-cd LbT/lbt_programming_binarysearch
-
-python -m venv .venv
-source .venv/bin/activate  # Windows PowerShell: .venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-
-cp .env.example .env
-```
-
-作成した `.env` を開き、`OPENAI_API_KEY` に自分の API キーを設定します。
-
-```text
-OPENAI_API_KEY=sk-...
-```
-
-起動します。
-
-```bash
-streamlit run app.py
-```
-
-ブラウザで `http://localhost:8501` を開きます。
+Learning by Teaching（LbT）形式の対話システムを管理するリポジトリです。プログラミング分野の二分探索を題材にしたアプリを含んでいます。
 
 ## アプリ構成
 
 ```text
 .
-├── AGENTS.md
-├── README.md
-└── lbt_programming_binarysearch/
-    ├── app.py
-    ├── requirements.txt
-    ├── .env.example
-    └── .streamlit/
-        └── config.toml
+├── lbt_programming_binarysearch/
+│   └── 既存の Streamlit 版
+└── lbt_programming_binarysearch_web/
+    └── 新しい Flask + React 版
 ```
 
-- `lbt_programming_binarysearch/`: プログラミング・二分探索向けの LbT アプリ。
-- `AGENTS.md`: コントリビューター向けの作業ガイド。
-- `LbT.py`: 現在は未使用のプレースホルダー。
+- `lbt_programming_binarysearch/`: 既存の Streamlit アプリです。これまでの単一 Python アプリを残しています。
+- `lbt_programming_binarysearch_web/`: バックエンドとフロントエンドを分けた新しい構成です。バックエンドは Flask、フロントエンドは React です。
 
-## 概要
+## Flask + React 版を実行する
 
-このアプリでは、ユーザーが Tutor として二分探索を教え、AI 学習者 `AlgoBo` が質問や応答を返します。Tutor の発話は分類され、指示偏重・説明しすぎ・情報不足などの傾向がある場合は Teaching Helper が改善を促します。
+前提:
 
-## セットアップ
-
-```bash
-cd lbt_programming_binarysearch
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-この環境では `uv` を使う場合もあります。
+- Docker / Docker Compose
+- OpenAI API キー
 
 ```bash
-uv venv .venv
-uv pip install -r requirements.txt
-```
-
-## OpenAI API キー
-
-`lbt_programming_binarysearch/.env.example` をコピーして `lbt_programming_binarysearch/.env` を作成し、API キーを設定します。
-
-```bash
-cd lbt_programming_binarysearch
+git clone <このリポジトリのURL>
+cd LbT/lbt_programming_binarysearch_web
 cp .env.example .env
 ```
 
-`.env` の中身を編集します。
+`.env` を開き、`OPENAI_API_KEY` に自分の API キーを設定します。
 
 ```text
 OPENAI_API_KEY=sk-...
 ```
 
-必要に応じてモデルも変更できます。通常は `.env.example` のデフォルトのままで構いません。
+Docker で起動します。
 
-`.env` は git 管理しないでください。
+```bash
+docker compose up --build
+```
 
-## 起動方法
+ブラウザで `http://localhost:5000` を開きます。
+
+## Streamlit 版を実行する
 
 ```bash
 cd lbt_programming_binarysearch
+
+python -m venv .venv
 source .venv/bin/activate
+pip install -r requirements.txt
+
+cp .env.example .env
+```
+
+`.env` に `OPENAI_API_KEY` を設定してから起動します。
+
+```bash
 streamlit run app.py
 ```
 
@@ -103,21 +64,25 @@ streamlit run app.py
 
 ## 確認コマンド
 
+Streamlit 版:
+
 ```bash
+cd lbt_programming_binarysearch
 python -m py_compile app.py
 ```
 
-現在、自動テストは未整備です。変更後は構文チェックと Streamlit の手動起動確認を行ってください。
+Flask + React 版:
+
+```bash
+cd lbt_programming_binarysearch_web
+python -m py_compile backend/app.py
+docker compose build
+```
 
 ## よくあるエラー
 
-`OpenAI APIキーが見つかりません。OPENAI_API_KEY を設定してください。` と表示される場合は、`lbt_programming_binarysearch/.env` が存在し、`OPENAI_API_KEY` が設定されているか確認してください。
+`OPENAI_API_KEY` が見つからない場合は、各アプリフォルダの `.env` が存在し、`OPENAI_API_KEY` が設定されているか確認してください。
 
-`streamlit: command not found` と表示される場合は、仮想環境を有効化してから依存関係をインストールしてください。
+`ModuleNotFoundError` が出る場合は、仮想環境を有効化してから `pip install -r requirements.txt` を実行してください。
 
-```bash
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-`python: command not found` と表示される環境では、代わりに `python3` を使ってください。
+`docker: command not found` と表示される場合は、Docker Desktop または Docker Engine をインストールしてください。
