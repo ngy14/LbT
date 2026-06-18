@@ -2,6 +2,38 @@
 
 Learning by Teaching（LbT）形式の対話システムを管理するリポジトリです。現在は、プログラミング分野の二分探索を題材にした Streamlit アプリを含んでいます。
 
+## まず実行する
+
+前提:
+
+- Python 3.10 以上
+- OpenAI API キー
+
+```bash
+git clone <このリポジトリのURL>
+cd LbT/lbt_programming_binarysearch
+
+python -m venv .venv
+source .venv/bin/activate  # Windows PowerShell: .venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+
+cp .env.example .env
+```
+
+作成した `.env` を開き、`OPENAI_API_KEY` に自分の API キーを設定します。
+
+```text
+OPENAI_API_KEY=sk-...
+```
+
+起動します。
+
+```bash
+streamlit run app.py
+```
+
+ブラウザで `http://localhost:8501` を開きます。
+
 ## アプリ構成
 
 ```text
@@ -42,20 +74,22 @@ uv pip install -r requirements.txt
 
 ## OpenAI API キー
 
-`lbt_programming_binarysearch/.env` を作成し、API キーを設定します。
+`lbt_programming_binarysearch/.env.example` をコピーして `lbt_programming_binarysearch/.env` を作成し、API キーを設定します。
+
+```bash
+cd lbt_programming_binarysearch
+cp .env.example .env
+```
+
+`.env` の中身を編集します。
 
 ```text
 OPENAI_API_KEY=sk-...
 ```
 
-必要に応じてモデルも変更できます。
+必要に応じてモデルも変更できます。通常は `.env.example` のデフォルトのままで構いません。
 
-```text
-OPENAI_MODEL_ID=gpt-5.2
-OPENAI_MODEL_ID_CLS=gpt-5-nano
-```
-
-`.env` は git 管理しないでください。設定例は `.env.example` を参照してください。
+`.env` は git 管理しないでください。
 
 ## 起動方法
 
@@ -74,3 +108,16 @@ python -m py_compile app.py
 ```
 
 現在、自動テストは未整備です。変更後は構文チェックと Streamlit の手動起動確認を行ってください。
+
+## よくあるエラー
+
+`OpenAI APIキーが見つかりません。OPENAI_API_KEY を設定してください。` と表示される場合は、`lbt_programming_binarysearch/.env` が存在し、`OPENAI_API_KEY` が設定されているか確認してください。
+
+`streamlit: command not found` と表示される場合は、仮想環境を有効化してから依存関係をインストールしてください。
+
+```bash
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+`python: command not found` と表示される環境では、代わりに `python3` を使ってください。
