@@ -258,6 +258,15 @@ def _looks_like_question_sentence(q: str) -> bool:
     if _is_trivial_question(q):
         return False
 
+    # 「どんな結果になるのはなぜ」のように、what/how と why が混ざった不自然な質問を弾く
+    awkward_patterns = [
+        r"どんな.+(のは|なのは)なぜ",
+        r"どのような.+(のは|なのは)なぜ",
+        r"何.+(のは|なのは)なぜ",
+    ]
+    if any(re.search(p, q) for p in awkward_patterns):
+        return False
+
     # 1文ルール（句点が多い/改行がある）は弾く
     if "\n" in q:
         return False
@@ -315,7 +324,11 @@ def generate_question_safe(client, context, past_qs, qtype="WHY"):
 - 12〜60文字程度
 - 1文、改行禁止、説明禁止
 - 「？」で終了
-- 具体語を1つ含める（low/high/mid/while/不変条件/反例/具体例/計算量 のどれか）
+- 初学者に自然な言葉にする
+- 「不変条件」「単調性」のような専門語は禁止
+- 「どんな結果になるのはなぜですか」のように「どんな」と「なぜ」を混ぜた不自然な文は禁止
+- 聞き方は「どんな結果になりますか？」または「なぜ間違えますか？」のどちらか一方にする
+- 具体語を1つ含める（low/high/mid/while/反例/具体例/計算量/ソート のどれか）
 """,
             user_prompt=f"[CONTEXT]\n{context}\n\n質問文を1つだけ出力:",
             temperature=0.7,
@@ -798,25 +811,133 @@ def op_retrieve(client, current_state, context):
     except: pass
     return retrieved_content
 
-def op_compose(client, retrieved, context):
+
+def op_check_consistency(client, current_state, new_knowledge):
+    if not new_knowledge:
+        return {
+            "verdict": "NO_NEW_KNOWLEDGE",
+            "summary": "",
+            "conflict_with": "",
+        }
+
+    current_items = (current_state.get("facts", []) or []) + (current_state.get("code_implementation", []) or [])
+    if not current_items:
+        return {
+            "verdict": "NO_PRIOR_KNOWLEDGE",
+            "summary": "既存知識がまだないため、この内容を最初の知識として確認します。",
+            "conflict_with": "",
+        }
+
+    current_text = "\n".join(current_items)
+    new_text = "\n".join(new_knowledge)
+    current_norm = _norm_text(current_text)
+    new_norm = _norm_text(new_text)
+
+    # 二分探索ドメインで重要な典型ケースは、分類モデルに任せず先に固定判定する。
+    says_unsorted_always_ok = (
+        ("ソートされていなくても" in new_norm or "並んでいなくても" in new_norm or "整列されていなくても" in new_norm)
+        and ("常に" in new_norm or "いつでも" in new_norm or "必ず" in new_norm)
+        and ("正しく" in new_norm or "探せ" in new_norm or "探索" in new_norm)
+    )
+    prior_depends_on_order = (
+        ("並んでいる" in current_norm or "ソート" in current_norm or "整列" in current_norm)
+        and ("左" in current_norm or "右" in current_norm or "半分" in current_norm or "真ん中" in current_norm or "中央" in current_norm)
+    )
+    if says_unsorted_always_ok and prior_depends_on_order:
+        return {
+            "verdict": "CONFLICT",
+            "summary": "未ソートでも常に正しく探せるという説明は、並んだデータで左右を判断するという既存知識と矛盾します。",
+            "conflict_with": current_items[0],
+        }
+
+    says_sort_needed_for_direction = (
+        ("ソートが必要" in new_norm or "並んでいる必要" in new_norm or "整列が必要" in new_norm)
+        and ("左" in new_norm or "右" in new_norm)
+        and ("判断" in new_norm or "決め" in new_norm or "行く" in new_norm)
+    )
+    if says_sort_needed_for_direction and prior_depends_on_order:
+        return {
+            "verdict": "CONSISTENT",
+            "summary": "ソートが左右判断に必要という補足は、並んだデータで範囲を半分に減らす既存知識と両立します。",
+            "conflict_with": "",
+        }
+
+    current_knowledge_str = json.dumps(current_state, ensure_ascii=False, indent=2)
+    new_knowledge_str = "\n".join([f"- {item}" for item in new_knowledge])
+
+    system_prompt = """
+あなたはAlgoBoの知識状態を点検する評価者です。
+[CURRENT KNOWLEDGE] と [LATEST KNOWLEDGE] を比較し、明確な矛盾があるか判定してください。
+
+判定ルール:
+- 言い換え、詳細化、補足、抽象度の違いは CONSISTENT
+- 片方にしか書かれていない情報は、反対内容でない限り CONSISTENT
+- 明確に両立しない内容だけ CONFLICT
+- 判断に迷う場合は UNCLEAR
+
+出力は必ずJSONのみ:
+{
+  "verdict": "CONSISTENT" | "CONFLICT" | "UNCLEAR",
+  "summary": "短い判定理由",
+  "conflict_with": "矛盾する既存知識の短い抜粋。なければ空文字"
+}
+"""
+    user_prompt = f"[CURRENT KNOWLEDGE]\n{current_knowledge_str}\n\n[LATEST KNOWLEDGE]\n{new_knowledge_str}\n\n矛盾判定:"
+
+    res = call_role(
+        client,
+        role="CLS",
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        temperature=0.0,
+        max_tokens=256,
+    ) or ""
+
+    try:
+        obj = extract_json_block(res)
+        verdict = str(obj.get("verdict", "UNCLEAR")).upper()
+        if verdict not in {"CONSISTENT", "CONFLICT", "UNCLEAR"}:
+            verdict = "UNCLEAR"
+        return {
+            "verdict": verdict,
+            "summary": str(obj.get("summary", "")),
+            "conflict_with": str(obj.get("conflict_with", "")),
+        }
+    except Exception:
+        return {
+            "verdict": "UNCLEAR",
+            "summary": "矛盾判定のJSON解析に失敗しました。",
+            "conflict_with": "",
+        }
+
+
+def op_compose(client, latest_knowledge, context, consistency_check=None):
     # 【詳細版】応答生成プロンプト
     persona = "あなたはAlgoBoという、プログラミングを学ぶ1年目の学生です。C言語の基本的なシンタックスは知っていますが、二分探索のロジックで苦労しています。親しみやすく、質問に熱心に応答しますが、知らないことには素直に助けを求めます。回答は全て日本語で行ってください。"
 
-    if not retrieved:
+    if not latest_knowledge:
         return "二分探索についてもっと詳しく説明してもらえませんか？"
 
-    retrieved_str = "\n".join(retrieved)
+    latest_knowledge_str = "\n".join(latest_knowledge)
+    consistency_check = consistency_check or {"verdict": "UNCLEAR", "summary": "", "conflict_with": ""}
+    consistency_str = json.dumps(consistency_check, ensure_ascii=False, indent=2)
     system_prompt = f"""
     {persona}
 
     あなたの応答は、以下の制約を厳守してください:
-    1. 応答は**最大3文**までで、簡潔にしてください。
-    2. 応答は、**[RETRIEVED KNOWLEDGE]**に書かれた情報のみを根拠としてください。
-    3. 知識が不足している場合は、「二分探索についてもっと詳しく説明してもらえませんか？」といった**助けを求める形式**で応答してください。
-    4. 語尾には感嘆符（！）を使用するなど、親しみやすい学生のような口調を維持してください。
-    5. 回答は**全て日本語**で行ってください。
+    1. 応答は**最大2文**までで、簡潔にしてください。
+    2. 基本は1文だけで、**[LATEST KNOWLEDGE]**に書かれた直前のTutor発話内容だけを確認する口調にしてください。
+    3. [LATEST KNOWLEDGE]にない定義、手順、理由、例、補足知識を追加してはいけません。
+    4. [CONVERSATION CONTEXT]は文脈把握のためだけに使い、新しい知識の根拠にしてはいけません。
+    5. Tutorに教えてもらった内容を確認する口調にしてください（例: 「〜ということですね」「〜という理解で合っていますか？」）。
+    6. 「〜なんだよ」「〜です！」のように先生としてまとめ直す口調は禁止です。
+    7. **[CONSISTENCY CHECK]** の verdict が CONFLICT の場合だけ、2文目で既存知識と違って見える点を短く述べ、どちらで理解すべきか質問してください。
+    8. verdict が CONSISTENT / NO_PRIOR_KNOWLEDGE / UNCLEAR の場合は、矛盾確認について触れないでください。「矛盾していません」「矛盾はなさそうです」「既存知識がまだない」なども言わないでください。
+    9. 知識が不足している場合は、「二分探索についてもっと詳しく説明してもらえませんか？」といった**助けを求める形式**で応答してください。
+    10. 親しみやすい学生のような口調を維持してください。
+    11. 回答は**全て日本語**で行ってください。
     """
-    user_prompt = f"[会話の文脈（最新メッセージ）]\n{context}\n\n[RETRIEVED KNOWLEDGE]\n{retrieved_str}\n\nこの情報とペルソナに基づき、AlgoBoとして応答してください。"
+    user_prompt = f"[CONVERSATION CONTEXT]\n{context}\n\n[LATEST KNOWLEDGE]\n{latest_knowledge_str}\n\n[CONSISTENCY CHECK]\n{consistency_str}\n\nAlgoBoとして、直前発話の確認を短く応答してください。矛盾がある場合だけ、どちらで理解すべきかも確認してください。"
 
     res = call_role(
         client,
@@ -826,8 +947,8 @@ def op_compose(client, retrieved, context):
         temperature=0.2,
         max_tokens=512,
     )
-    if not res or (not retrieved and "分かりません" not in res): return "二分探索についてもっと詳しく説明してもらえませんか？"
-    return clamp_sentences_ja(res, 3)
+    if not res or (not latest_knowledge and "分かりません" not in res): return "二分探索についてもっと詳しく説明してもらえませんか？"
+    return clamp_sentences_ja(res, 2)
 
 def generate_question(client, context, past_qs, qtype: str = "WHY"):
     past_q_str = "\n".join([f"- {q}" for q in past_qs])
@@ -844,8 +965,11 @@ def generate_question(client, context, past_qs, qtype: str = "WHY"):
 1. 質問は最大1文
 2. {q_instruction}
 3. 下の【過去の質問】と内容が被る質問は禁止（言い換えも禁止）
-4. 違う観点（例：不変条件、計算量、境界条件、失敗判定、重複要素など）を狙う
-5. 出力は「？（または?）」で終わる質問文だけにしてください。説明文は禁止。改行も禁止。
+4. 初学者に自然な言葉で聞く。「不変条件」「単調性」のような専門語は禁止
+5. 違う観点（例：具体例、計算量、境界条件、失敗ケース、重複要素など）を狙う
+6. 「どんな結果になるのはなぜですか」のように「どんな」と「なぜ」を混ぜた不自然な文は禁止
+7. 聞き方は「どんな結果になりますか？」または「なぜ間違えますか？」のどちらか一方にする
+8. 出力は「？（または?）」で終わる質問文だけにしてください。説明文は禁止。改行も禁止。
 
 【過去の質問】
 {past_q_str}
@@ -1099,10 +1223,10 @@ FOLLOWUP_PROTOCOLS = {
         ("bd_condition", "while low<high と low<=high の違いは、どんなケースで結果に影響しますか？"),
     ],
 
-    # “根拠/不変条件” を言わせる（例がなくても成立しやすい）
+    # “根拠” を初学者向けの言葉で言わせる（例がなくても成立しやすい）
     "invariant_reason": [
-        ("inv_invariant", "二分探索で『捨てた側に答えが無い』と言える根拠（不変条件）を1文で言えますか？"),
-        ("inv_monotonic", "ソートの代わりに必要な条件（単調性）を、自分の言葉で説明できますか？"),
+        ("inv_invariant", "二分探索で『こっち側には答えがない』と言える理由を1文で説明できますか？"),
+        ("inv_monotonic", "ソートされていないと左右のどちらを探すか決めにくい理由を、自分の言葉で説明できますか？"),
     ],
 }
 
@@ -1148,7 +1272,7 @@ def pick_followup_from_protocol(question: str, struct: dict, used_ids: list) -> 
     if need_ce:
         candidates += FOLLOWUP_PROTOCOLS["counterexample"]
 
-    # 最後に “根拠/不変条件” で詰まらないよう保険
+    # 最後に “根拠” を初学者向けの言葉で聞く保険
     candidates += FOLLOWUP_PROTOCOLS["invariant_reason"]
 
     # 重複回避
@@ -1811,6 +1935,7 @@ def main():
         # ★追加：このターンのAlgoBo発話に対応するメタ
         llm_meta = None
         llm_meta_source = None
+        consistency_check = None
 
         # 追加：answered と next を分離して記録する
         answered_round = None
@@ -1828,7 +1953,6 @@ def main():
         st.session_state.messages.append({"role": "user", "content": prompt_text})
 
         last_convo = build_llm_context(last_k=3)
-        tutor_only = build_tutor_only_context(last_k=6)
 
         # このターンの helper 情報（ブロック発生時も保持する）
         # このターンの helper 情報（ブロック発生時も保持する）
@@ -1862,9 +1986,14 @@ def main():
 
         }
 
-        # Reflect (knowledge update)
-        new_knowledge = op_extract(client, tutor_only) or []
-        if new_knowledge:
+        # Reflect: 直前のTutor発話から知識を抽出し、既存の全知識との矛盾を確認する
+        new_knowledge = op_extract(client, prompt_text) or []
+        consistency_check = op_check_consistency(
+            client,
+            st.session_state.knowledge_state,
+            new_knowledge,
+        )
+        if new_knowledge and consistency_check.get("verdict") != "CONFLICT":
             st.session_state.knowledge_state = op_update(
                 client, st.session_state.knowledge_state, new_knowledge
             )
@@ -1877,7 +2006,25 @@ def main():
 
         # --- constructive loop（論文の「満足するまで追い質問」） :contentReference[oaicite:14]{index=14}
         # --- constructive loop（十分条件で終了、capは保険） ---
-        if st.session_state.question_loop_active and st.session_state.last_thinking_question:
+        if consistency_check and consistency_check.get("verdict") == "CONFLICT":
+            st.session_state.mode = "HELP_RECEIVER"
+            response_text = op_compose(client, new_knowledge, last_convo, consistency_check)
+            llm_meta = st.session_state.get("_last_llm_meta")
+            llm_meta_source = "compose(consistency_conflict)"
+
+            st.session_state.question_loop_active = False
+            st.session_state.question_loop_round = 0
+            st.session_state.last_thinking_question = None
+            st.session_state.loop_used_proto_ids = []
+            loop_end_reason = "consistency_conflict"
+
+            if LOG_TIMING_TRACE:
+                timing["policy"] = "consistency_check"
+                timing["rule"] = "consistency_check.verdict == CONFLICT"
+                timing["triggered"] = True
+                timing["trigger_kind"] = "consistency_conflict"
+
+        elif st.session_state.question_loop_active and st.session_state.last_thinking_question:
             answered_round = st.session_state.question_loop_round
             answered_question = st.session_state.last_thinking_question
 
@@ -2012,8 +2159,7 @@ def main():
                     timing["trigger_kind"] = "none"
 
                 st.session_state.mode = "HELP_RECEIVER"
-                retrieved = op_retrieve(client, st.session_state.knowledge_state, last_convo)
-                response_text = op_compose(client, retrieved, last_convo)
+                response_text = op_compose(client, new_knowledge, last_convo, consistency_check)
                 llm_meta = st.session_state.get("_last_llm_meta")
                 llm_meta_source = "compose"
 
@@ -2050,6 +2196,7 @@ def main():
             "llm_meta": llm_meta,
             "llm_meta_source": llm_meta_source,
             "knowledge_delta": new_knowledge,
+            "consistency_check": consistency_check,
             "answer_structure": answer_structure,
             "timing": (timing if LOG_TIMING_TRACE else None),
             "question_gen": (question_gen if LOG_QUESTION_GEN_TRACE else None),
@@ -2073,6 +2220,8 @@ def main():
             "llm_meta_source": llm_meta_source,
             "mode": st.session_state.mode,
             "objective": st.session_state.objective,
+            "knowledge_delta": new_knowledge,
+            "consistency_check": consistency_check,
             "helper": helper_info,
         })
 
